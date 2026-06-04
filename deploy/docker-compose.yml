@@ -1,0 +1,61 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      APP_ENV: production
+      APP_PORT: "8080"
+      DATABASE_URL: postgres://app:${POSTGRES_PASSWORD}@postgres:5432/app?sslmode=disable
+      REDIS_ADDR: redis:6379
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  migrate:
+    image: postgres:18-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ../backend/migrations:/migrations:ro
+    entrypoint: ["sh", "-c", "psql -h postgres -U app -d app -f /migrations/000001_init.sql"]
+    restart: "no"
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # No public port: internal network only.
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:

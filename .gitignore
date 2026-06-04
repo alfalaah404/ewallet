@@ -1,0 +1,24 @@
+# --- secrets / env ---
+.env
+.env.*
+!.env.example
+*.local
+
+# --- Go backend ---
+backend/bin/
+# built SPA copied in at deploy time (see Makefile)
+backend/web/
+# coverage profiles (cover.out)
+*.out
+*.test
+
+# --- Node / frontend ---
+node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/.svelte-kit/
+
+# --- misc ---
+*.log
+.DS_Store
