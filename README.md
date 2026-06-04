@@ -43,37 +43,52 @@ make build && cd backend && ./bin/api
 
 ## Deploy
 
-The whole stack (API + Postgres + Redis + one-shot migration) is containerized.
-A single multi-stage `Dockerfile` builds the SPA and the Go binary into one
-image that serves both the API and the UI on port `8080` (single-origin).
+The app image is self-contained: a single multi-stage `Dockerfile` builds the
+SPA and the Go binary into one image that serves both the API and the UI on
+port `8080` (single-origin). **Postgres and Redis are provisioned separately as
+Coolify-managed services** — the compose file only runs the `api` plus a
+one-shot `migrate` job, both pointed at those external services via env vars.
+
+`deploy/docker-compose.yml` therefore needs two connection values:
+
+- `DATABASE_URL` — full Postgres connection string from the Coolify Postgres resource
+- `REDIS_ADDR`   — `host:port` from the Coolify Redis resource
+- `CORS_ORIGINS` — your public origin (use `*` only for quick testing)
 
 ### Option A: Coolify (recommended)
 
-1. In Coolify: **New Resource → Docker Compose**, point it at this repo
-   (branch `main`), and set the compose path to `deploy/docker-compose.yml`.
-2. Set the environment variables (Coolify → the resource → Environment):
-   - `POSTGRES_PASSWORD` — a long random string
-   - `CORS_ORIGINS` — your public domain, e.g. `https://ewallet.example.com`
-     (use `*` only for quick testing)
-3. Coolify auto-detects the `api` service exposing port `8080`; attach your
+1. **Create the databases first.** In Coolify add a **Postgres** resource and a
+   **Redis** resource. Note their internal connection details (use the internal
+   service hostnames so traffic stays on Coolify's private network).
+2. **Add the app.** New Resource → **Docker Compose**, point it at this repo
+   (branch `main`), compose path `deploy/docker-compose.yml`.
+3. **Set environment variables** (Coolify → the resource → Environment):
+   - `DATABASE_URL=postgres://USER:PASSWORD@<pg-internal-host>:5432/DBNAME?sslmode=disable`
+   - `REDIS_ADDR=<redis-internal-host>:6379`
+   - `CORS_ORIGINS=https://your-domain`
+4. Coolify auto-detects the `api` service exposing port `8080`; attach your
    domain to it. Coolify terminates TLS and reverse-proxies for you — you do
    **not** need to publish ports yourself.
-4. Deploy. Boot order is handled automatically: Postgres/Redis come up healthy,
-   the `migrate` job runs `000001_init.sql` once, then `api` starts. The image
-   healthcheck hits `/healthz`.
+5. Deploy. Boot order is automatic: the `migrate` job runs `000001_init.sql`
+   once against your Postgres, then `api` starts. The image healthcheck hits
+   `/healthz`. The migration is idempotent (`IF NOT EXISTS`), so redeploys are safe.
 
-Postgres and Redis have **no public ports** (internal network only); their data
-persists in named volumes (`postgres_data`, `redis_data`).
+### Option B: plain `docker compose` (self-host)
 
-### Option B: plain `docker compose`
+You supply your own Postgres + Redis (any host the containers can reach).
 
 ```bash
 cd deploy
-cp .env.example .env          # set POSTGRES_PASSWORD + CORS_ORIGINS
+cp .env.example .env     # set DATABASE_URL + REDIS_ADDR + CORS_ORIGINS
 docker compose up -d --build
 # API + UI live on http://<host>:8080  (health: /healthz, ready: /readyz)
 ```
 
 To apply future schema changes, add migration files under
 `backend/migrations/` and re-run the `migrate` service.
+
+> Verified locally with Docker 29 / Compose v5: image builds, `migrate` runs
+> then exits 0, `api` starts and passes `/healthz`, and a full create-wallet →
+> transfer → ledger round-trip works against external Postgres + Redis.
+
 
