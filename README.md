@@ -40,3 +40,40 @@ cp backend/.env.example backend/.env   # fill in real values
 # build SPA + copy into backend/web, then run the API
 make build && cd backend && ./bin/api
 ```
+
+## Deploy
+
+The whole stack (API + Postgres + Redis + one-shot migration) is containerized.
+A single multi-stage `Dockerfile` builds the SPA and the Go binary into one
+image that serves both the API and the UI on port `8080` (single-origin).
+
+### Option A: Coolify (recommended)
+
+1. In Coolify: **New Resource → Docker Compose**, point it at this repo
+   (branch `main`), and set the compose path to `deploy/docker-compose.yml`.
+2. Set the environment variables (Coolify → the resource → Environment):
+   - `POSTGRES_PASSWORD` — a long random string
+   - `CORS_ORIGINS` — your public domain, e.g. `https://ewallet.example.com`
+     (use `*` only for quick testing)
+3. Coolify auto-detects the `api` service exposing port `8080`; attach your
+   domain to it. Coolify terminates TLS and reverse-proxies for you — you do
+   **not** need to publish ports yourself.
+4. Deploy. Boot order is handled automatically: Postgres/Redis come up healthy,
+   the `migrate` job runs `000001_init.sql` once, then `api` starts. The image
+   healthcheck hits `/healthz`.
+
+Postgres and Redis have **no public ports** (internal network only); their data
+persists in named volumes (`postgres_data`, `redis_data`).
+
+### Option B: plain `docker compose`
+
+```bash
+cd deploy
+cp .env.example .env          # set POSTGRES_PASSWORD + CORS_ORIGINS
+docker compose up -d --build
+# API + UI live on http://<host>:8080  (health: /healthz, ready: /readyz)
+```
+
+To apply future schema changes, add migration files under
+`backend/migrations/` and re-run the `migrate` service.
+
